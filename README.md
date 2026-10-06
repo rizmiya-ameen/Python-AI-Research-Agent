@@ -4,6 +4,10 @@ An AI research assistant built with **LangChain** and **Google Gemini**. Ask it 
 
 It comes with a small web UI (FastAPI) and a command-line version.
 
+### 🚀 Live Demo
+
+👉 **[Try the AI Research Agent](https://python-ai-agent-lake.vercel.app/)**
+
 ![Research Agent web UI answering "how rainbow is formed"](screenshot.png)
 
 ## Features
