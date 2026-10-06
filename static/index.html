@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Research Agent</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --text: #1d1d1b; --muted: #6b6a66;
+    --line: #dedcd5; --accent: #2f5d50; --accent-text: #ffffff; --error: #a3341f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161715; --card: #1f211e; --text: #ecebe6; --muted: #9c9b95;
+      --line: #33352f; --accent: #7fbfa8; --accent-text: #10201b; --error: #f08a73;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 48px 16px 64px; }
+  h1 { font-size: 1.75rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .lede { color: var(--muted); margin: 0 0 24px; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; }
+  input {
+    flex: 1 1 240px; min-width: 0; padding: 12px 14px; font: inherit; color: inherit;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  }
+  button {
+    padding: 12px 18px; font: inherit; font-weight: 600; cursor: pointer;
+    color: var(--accent-text); background: var(--accent); border: 0; border-radius: 8px;
+  }
+  button.secondary { color: var(--text); background: transparent; border: 1px solid var(--line); }
+  button:disabled { opacity: 0.6; cursor: progress; }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #status { margin: 20px 0 0; color: var(--muted); }
+  #status.error { color: var(--error); }
+  #result {
+    margin-top: 24px; padding: 24px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 12px;
+  }
+  #result h2 { margin: 0 0 12px; font-size: 1.3rem; }
+  #result h3 {
+    margin: 24px 0 8px; font-size: 0.8rem; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted);
+  }
+  #summary { white-space: pre-wrap; margin: 0; }
+  #sources { margin: 0; padding-left: 20px; overflow-wrap: anywhere; }
+  a { color: var(--accent); }
+  .tag {
+    display: inline-block; margin: 0 6px 6px 0; padding: 2px 10px; font-size: 0.85rem;
+    border: 1px solid var(--line); border-radius: 999px;
+  }
+  .actions { margin-top: 24px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Research Agent</h1>
+  <p class="lede">Ask a question. The agent searches the web and Wikipedia, then writes a sourced summary.</p>
+
+  <form id="form">
+    <input id="query" name="query" placeholder="e.g. How do coral reefs recover from bleaching?"
+           aria-label="Research question" minlength="3" maxlength="500" required autofocus>
+    <button id="submit" type="submit">Research</button>
+  </form>
+
+  <p id="status" role="status" hidden></p>
+
+  <section id="result" hidden>
+    <h2 id="topic"></h2>
+    <p id="summary"></p>
+    <h3>Sources</h3>
+    <ul id="sources"></ul>
+    <h3>Tools used</h3>
+    <div id="tools"></div>
+    <div class="actions">
+      <button id="download" class="secondary" type="button">Download as .txt</button>
+    </div>
+  </section>
+</main>
+
+<script>
+  const form = document.getElementById("form");
+  const submit = document.getElementById("submit");
+  const status = document.getElementById("status");
+  const result = document.getElementById("result");
+  let current = null;
+
+  function setStatus(text, isError) {
+    status.textContent = text;
+    status.hidden = !text;
+    status.classList.toggle("error", Boolean(isError));
+  }
+
+  function render(data) {
+    document.getElementById("topic").textContent = data.topic;
+    document.getElementById("summary").textContent = data.summary;
+
+    const sources = document.getElementById("sources");
+    sources.replaceChildren();
+    for (const source of data.sources.length ? data.sources : ["No sources reported"]) {
+      const li = document.createElement("li");
+      if (/^https?:\/\//i.test(source)) {
+        const a = document.createElement("a");
+        a.href = source;
+        a.textContent = source;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        li.append(a);
+      } else {
+        li.textContent = source;
+      }
+      sources.append(li);
+    }
+
+    const tools = document.getElementById("tools");
+    tools.replaceChildren();
+    for (const tool of data.tools_used.length ? data.tools_used : ["none"]) {
+      const span = document.createElement("span");
+      span.className = "tag";
+      span.textContent = tool;
+      tools.append(span);
+    }
+    result.hidden = false;
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const query = document.getElementById("query").value.trim();
+    if (!query) return;
+
+    submit.disabled = true;
+    result.hidden = true;
+    setStatus("Researching… this usually takes 10–30 seconds.");
+    try {
+      const response = await fetch("/api/research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(typeof body.detail === "string" ? body.detail : "Request failed (" + response.status + ").");
+      }
+      current = await response.json();
+      render(current);
+      setStatus("");
+    } catch (error) {
+      setStatus(error.message || "Something went wrong.", true);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  document.getElementById("download").addEventListener("click", () => {
+    if (!current) return;
+    const text = [
+      current.topic, "", current.summary, "",
+      "Sources:", ...current.sources.map((s) => " - " + s), "",
+      "Tools used: " + (current.tools_used.join(", ") || "none"),
+    ].join("\n");
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "research_output.txt";
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+</script>
+</body>
+</html>
